@@ -1,0 +1,71 @@
+import sqlite3
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Optional
+from datetime import date, datetime
+
+DB_NAME = "wms_database.db"
+
+def inicializar_banco():
+    conexao = sqlite3.connect(DB_NAME)
+    cursor = conexao.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS estoque (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sku TEXT NOT NULL,
+            descricao TEXT NOT NULL,
+            lote TEXT NOT NULL,
+            quantidade INTEGER NOT NULL,
+            endereco TEXT NOT NULL,
+            data_validade TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS transacoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,
+            sku TEXT,
+            quantidade INTEGER,
+            usuario TEXT,
+            timestamp TEXT NOT NULL
+        )
+    """)
+    conexao.commit()
+    conexao.close()
+
+inicializar_banco()
+
+app = FastAPI(title="WMS Enterprise Cloud API")
+
+class ProdutoRecebimento(BaseModel):
+    sku: str
+    descricao: str
+    lote: str
+    quantidade: int
+    endereco: str
+    data_validade: Optional[date] = None
+    usuario: Optional[str] = "Sistema"
+
+@app.post("/api/v1/recebimento")
+def registrar_recebimento(item: ProdutoRecebimento):
+    conexao = sqlite3.connect(DB_NAME)
+    cursor = conexao.cursor()
+    cursor.execute("""
+        INSERT INTO estoque (sku, descricao, lote, quantidade, endereco, data_validade)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (item.sku, item.descricao, item.lote, item.quantidade, item.endereco, str(item.data_validade) if item.data_validade else None))
+    
+    cursor.execute("INSERT INTO transacoes (tipo, sku, quantidade, usuario, timestamp) VALUES (?, ?, ?, ?, ?)",
+                   ("RECEBIMENTO", item.sku, item.quantidade, item.usuario, datetime.now().isoformat()))
+    conexao.commit()
+    conexao.close()
+    return {"mensagem": "Recebimento processado na nuvem com sucesso!"}
+
+@app.get("/api/v1/estoque")
+def consultar_estoque():
+    conexao = sqlite3.connect(DB_NAME)
+    cursor = conexao.cursor()
+    cursor.execute("SELECT sku, descricao, lote, quantidade, endereco, data_validade FROM estoque")
+    rows = cursor.fetchall()
+    conexao.close()
+    return {"itens": [{"sku": r[0], "descricao": r[1], "lote": r[2], "quantidade": r[3], "endereco": r[4], "data_validade": r[5]} for r in rows]}
